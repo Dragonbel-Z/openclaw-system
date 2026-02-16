@@ -77,3 +77,54 @@ def scrape_richmond_spas(limit: int = 60, use_cache: bool = True):
         raise HTTPException(status_code=502, detail={"google_status": "ERROR", "raw": resp.text})
 
     return resp.json()
+    import csv
+from io import StringIO
+from fastapi.responses import Response
+
+@app.get("/export/spas/richmond")
+async def export_richmond_spas(limit: int = 60, use_cache: bool = True):
+    """
+    导出 Richmond Spa 列表为 CSV
+    依赖你现有的 /scrape/spas/richmond 返回格式：{"places":[{...}, ...]}
+    """
+
+    # ✅ 方式A（推荐）：直接调用你现有的 scrape 逻辑函数（如果你有的话）
+    # 比如你内部可能有：scrape_richmond_spas(limit, use_cache)
+    # data = await scrape_richmond_spas(limit=limit, use_cache=use_cache)
+
+    # ✅ 方式B（最省事/不改你原逻辑）：直接复用同一个接口（自调用）
+    # 注意：需要 requests 库；如果你 requirements 没有它，要加上 `requests`
+    import requests
+    base_url = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
+    if not base_url:
+        # Render 上通常可以用你服务的公开域名；你也可以在 Render env 手动设置 PUBLIC_BASE_URL
+        raise Exception("PUBLIC_BASE_URL is missing. Set it to https://co-api-xxxx.onrender.com")
+
+    url = f"{base_url}/scrape/spas/richmond?limit={limit}&use_cache={'true' if use_cache else 'false'}"
+    resp = requests.get(url, timeout=60)
+    resp.raise_for_status()
+    data = resp.json()
+
+    places = data.get("places", [])
+
+    # 生成 CSV
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["name", "rating", "phone", "address", "website"])
+
+    for p in places:
+        writer.writerow([
+            p.get("displayName", ""),
+            p.get("rating", ""),
+            p.get("nationalPhoneNumber", ""),
+            p.get("formattedAddress", ""),
+            p.get("websiteUri", ""),
+        ])
+
+    csv_bytes = output.getvalue().encode("utf-8-sig")  # utf-8-sig 方便 Excel 直接打开不乱码
+
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=richmond_spas.csv"}
+    )
